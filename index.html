@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>แอดมินพระแสง</title>
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="แอดมินพระแสง">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#FF7BAC">
+<style>
+  html,body{margin:0;height:100%;background:#FFF0F5;font-family:sans-serif;}
+  iframe{position:fixed;inset:0;width:100%;height:100%;border:0;}
+  .msg{padding:40px 24px;text-align:center;color:#E75A8F;}
+  .msg img{width:140px;border-radius:30px;}
+</style>
+</head>
+<body>
+<script>
+  // ⬇️ วางลิงก์เว็บแอป Apps Script (ลิงก์ที่ลงท้ายด้วย /exec) ไว้ในเครื่องหมาย ' ' บรรทัดนี้
+  const APP_URL = '';
+
+  if (APP_URL.startsWith('https://script.google.com/')) {
+    const f = document.createElement('iframe');
+    f.src = APP_URL;
+    f.allow = 'clipboard-write';
+    document.body.appendChild(f);
+  } else {
+    document.body.innerHTML =
+      '<div class="msg"><img src="icon-512.png" alt=""><h3>ยังไม่ได้ใส่ลิงก์แอป</h3>' +
+      '<p>แก้ไฟล์ index.html แล้ววางลิงก์ /exec ไว้ที่บรรทัด APP_URL</p></div>';
+  }
+</script>
+</body>
+</html>
