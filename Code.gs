@@ -5,6 +5,90 @@ const SHEET_NAME = ''; // ใส่ชื่อแผ่นงาน เช่�
 // เว้นว่างไว้ได้ แอพยังใช้งานปกติ แค่ไอคอนจะเป็นของ Google
 const LOGO_URL = '';
 
+// ============================================================
+// 🔗 เชื่อมกับระบบสั่งของ "พระแสงเดลิเวอรี่" (คนละบัญชี) — ระบบสั่งของส่งงานที่ส่งสำเร็จเข้ามาทางนี้
+// APP_SECRET ต้องตรงกับ ADMIN_APP_SECRET ใน Code.gs ของระบบสั่งของ · DELIVERY_URL = ลิงก์ /exec ของระบบสั่งของ
+// ⚠️ เว็บแอปนี้ต้อง Deploy แบบ "ผู้ที่มีสิทธิ์เข้าถึง: ทุกคน" ถึงจะรับข้อมูลจากอีกระบบได้ (ป้องกันด้วย APP_SECRET)
+// ============================================================
+const APP_SECRET = '9V1KIvL4VyvphMMQYVSGw-Yn1MuSXnHC';
+const DELIVERY_URL = 'https://script.google.com/macros/s/AKfycbyrqSO6l5CNmj_BuyKv7XCCOI4eNHoxNvcxzcSdA7FP3eu1pJ7QuHpWwEhW0kcIH6o0/exec';
+const DEFAULT_ADMIN_FEE = 5; // ค่าจ้างแอดมินต่อออเดอร์ (ออเดอร์อัตโนมัติ)
+const DEFAULT_SYS_FEE = 5;   // ค่าระบบต่อออเดอร์
+// คอลัมน์เพิ่มเติมของออเดอร์อัตโนมัติ: N(14)=รายการสินค้า O(15)=เบอร์ไรเดอร์ P(16)=แหล่งที่มา "auto" Q(17)=เวลาส่งสำเร็จ
+
+function jsonOut_(o) {
+  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  try {
+    const b = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    if (!b.secret || b.secret !== APP_SECRET) return jsonOut_({ success: false, message: 'unauthorized' });
+    if (b.action === 'upsertOrder') return jsonOut_(upsertAutoOrder_(b.order || {}));
+    if (b.action === 'setPaid') return jsonOut_(setPaidFromDelivery_(b.orderId, b.paid === true));
+    return jsonOut_({ success: false, message: 'unknown action' });
+  } catch (err) {
+    return jsonOut_({ success: false, message: String(err) });
+  }
+}
+
+// รับงานใหม่จากระบบสั่งของ: ถ้ามีเลขออเดอร์นี้อยู่แล้วจะไม่เขียนทับ (แอดมินอาจแก้ยอดไปแล้ว)
+function upsertAutoOrder_(o) {
+  const no = String(o.orderId || '').trim();
+  if (!no) return { success: false, message: 'no orderId' };
+  return withLock_(function () {
+    const sheet = getSheet_();
+    const last = sheet.getLastRow();
+    if (last >= 2) {
+      const ids = sheet.getRange(2, 1, last - 1, 1).getValues();
+      for (let i = 0; i < ids.length; i++) {
+        if (String(ids[i][0]) === no) return { success: true, existed: true };
+      }
+    }
+    const goods = Number(o.goods) || 0, ship = Number(o.ship) || 0;
+    const paid = Number(o.paid) || (goods + ship);
+    const net = goods + ship - DEFAULT_ADMIN_FEE - DEFAULT_SYS_FEE;
+    sheet.appendRow([
+      no, o.date || '', "'" + (o.time || ''), o.shop || '', o.rider || '',
+      goods, ship, paid, DEFAULT_ADMIN_FEE, DEFAULT_SYS_FEE, net,
+      'โอนแล้ว', 'รอโอน',
+      o.items || '', "'" + (o.riderPhone || ''), 'auto', "'" + (o.deliveredAt || '')
+    ]);
+    return { success: true, existed: false };
+  });
+}
+
+// ระบบสั่งของแจ้งมาว่าแอดมินกดโอนในปุ่ม Telegram แล้ว → ติ๊กโอนแล้วที่นี่
+function setPaidFromDelivery_(orderNo, paid) {
+  return withLock_(function () {
+    const sheet = getSheet_();
+    const last = sheet.getLastRow();
+    if (last < 2) return { success: false };
+    const ids = sheet.getRange(2, 1, last - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(orderNo)) {
+        sheet.getRange(i + 2, 13).setValue(paid ? 'โอนแล้ว' : 'รอโอน');
+        return { success: true };
+      }
+    }
+    return { success: false, message: 'not found' };
+  });
+}
+
+// แจ้งระบบสั่งของว่าโอนแล้ว/ยกเลิก (เฉพาะออเดอร์ที่มาจากระบบสั่งของ) — คืน true ถ้าสำเร็จ
+function notifyDelivery_(orderNo, paid) {
+  try {
+    const res = UrlFetchApp.fetch(DELIVERY_URL, {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true, followRedirects: true,
+      payload: JSON.stringify({ action: 'adminPayoutPaid', secret: APP_SECRET, orderId: String(orderNo), paid: paid === true })
+    });
+    return JSON.parse(res.getContentText()).success === true;
+  } catch (err) {
+    console.warn('แจ้งระบบสั่งของไม่สำเร็จ ' + orderNo + ': ' + err);
+    return false;
+  }
+}
+
 function doGet() {
   const out = HtmlService.createHtmlOutputFromFile('Phrasaeng')
       .setTitle('แอดมินพระแสงเดลิเวอรี่')
@@ -79,7 +163,11 @@ function getOrders() {
       sys: Number(row[9]) || 0,
       net: Number(row[10]) || 0,
       st: row[11] === 'ยกเลิก' ? 'cancel' : (row[11] === 'รอโอน' ? 'wait' : 'paid'),
-      rPaid: row[12] === true || row[12] === 'TRUE' || row[12] === 'โอนแล้ว'
+      rPaid: row[12] === true || row[12] === 'TRUE' || row[12] === 'โอนแล้ว',
+      items: String(row[13] || ''),
+      riderPhone: String(disp[i][14] || '').replace(/[^0-9]/g, ''),
+      src: String(row[15] || ''),
+      doneAt: String(disp[i][16] || '')
     });
   }
   return data.reverse();
@@ -144,16 +232,18 @@ function updateRiderPaymentInSheet(riderName, orderNos) {
   return withLock_(function () {
     const sheet = getSheet_();
     const lastRow = sheet.getLastRow();
-    if (lastRow < 2) return 'success';
-    const rows = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
+    if (lastRow < 2) return { ok: true, autoNos: [] };
+    const rows = sheet.getRange(2, 1, lastRow - 1, 16).getValues();
     const only = Array.isArray(orderNos) && orderNos.length ? new Set(orderNos.map(String)) : null;
 
+    const autoNos = [];
     const col13 = rows.map(function (r) {
       const match = r[4] === riderName && r[11] !== 'ยกเลิก' && (!only || only.has(String(r[0])));
+      if (match && r[12] !== 'โอนแล้ว' && String(r[15]) === 'auto') autoNos.push(String(r[0]));
       return [match ? 'โอนแล้ว' : r[12]];
     });
     sheet.getRange(2, 13, col13.length, 1).setValues(col13);
-    return 'success';
+    return { ok: true, autoNos: autoNos };
   });
 }
 
@@ -176,11 +266,17 @@ function setOrderRiderPaid(orderNo, paid) {
     for (let i = 0; i < ids.length; i++) {
       if (String(ids[i][0]) === String(orderNo)) {
         sheet.getRange(i + 2, 13).setValue(paid ? 'โอนแล้ว' : 'รอโอน');
-        return 'success';
+        const isAuto = String(sheet.getRange(i + 2, 16).getValue()) === 'auto';
+        return { ok: true, auto: isAuto, orderNo: String(orderNo) };
       }
     }
     throw new Error('ไม่พบออเดอร์ ' + orderNo);
   });
+}
+
+// แจ้งระบบสั่งของ (เรียกแยกจากการบันทึก เพื่อไม่ให้ติดล็อกชีตระหว่างรอเว็บอีกฝั่ง) — client เรียกต่อหลังติ๊กสำเร็จ
+function syncPaidToDelivery(orderNo, paid) {
+  return notifyDelivery_(orderNo, paid === true);
 }
 
 /* ---------- รายชื่อร้านค้า / ไรเดอร์ (เก็บในชีต ไม่หายเวลาอัปเดตโค้ด) ----------
